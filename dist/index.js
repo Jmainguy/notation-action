@@ -22762,6 +22762,9 @@ var ExitCode;
   ExitCode2[ExitCode2["Success"] = 0] = "Success";
   ExitCode2[ExitCode2["Failure"] = 1] = "Failure";
 })(ExitCode || (ExitCode = {}));
+function setSecret(secret) {
+  issueCommand("add-mask", {}, secret);
+}
 function addPath(inputPath) {
   const filePath = process.env["GITHUB_PATH"] || "";
   if (filePath) {
@@ -23244,6 +23247,7 @@ function _getGlobal(key, defaultValue) {
 // src/main.ts
 var import_node_child_process = require("node:child_process");
 var import_node_fs2 = require("node:fs");
+var import_node_os = require("node:os");
 var import_node_path = require("node:path");
 
 // src/lib.ts
@@ -23286,31 +23290,86 @@ async function latestVersion() {
   if (!release.tag_name) throw new Error("Latest Notation release did not include tag_name");
   return normalizeVersion(release.tag_name);
 }
+async function install(version) {
+  const cached = find("notation", version, process.arch);
+  if (cached) {
+    addPath(cached);
+    return (0, import_node_path.join)(cached, process.platform === "win32" ? "notation.exe" : "notation");
+  }
+  const asset = assetName(version, process.platform, process.arch);
+  const baseUrl = `https://github.com/${repository}/releases/download/v${version}`;
+  const [archive, checksumFile] = await Promise.all([
+    downloadTool(`${baseUrl}/${asset}`),
+    downloadTool(`${baseUrl}/notation_${version}_checksums.txt`)
+  ]);
+  const expected = expectedChecksum((0, import_node_fs2.readFileSync)(checksumFile, "utf8"), asset);
+  const actual = sha256(archive);
+  if (actual !== expected) throw new Error(`Checksum mismatch for ${asset}: expected ${expected}, got ${actual}`);
+  const extracted = process.platform === "win32" ? await extractZip(archive) : await extractTar(archive);
+  const cachedPath = await cacheDir(extracted, "notation", version, process.arch);
+  addPath(cachedPath);
+  return (0, import_node_path.join)(cachedPath, process.platform === "win32" ? "notation.exe" : "notation");
+}
+function requiredInput(name) {
+  const value = getInput(name);
+  if (!value) throw new Error(`Input ${name} is required when artifact is provided`);
+  return value;
+}
+function signAndVerify(binary, artifact) {
+  const keyName = getInput("key-name") || "notation-action";
+  const signatureFormat = getInput("signature-format") || "jws";
+  const privateKey = requiredInput("private-key");
+  const certificateChain = requiredInput("certificate-chain");
+  const caCertificate = requiredInput("ca-certificate");
+  const username = requiredInput("username");
+  const password = requiredInput("password");
+  setSecret(privateKey);
+  setSecret(certificateChain);
+  setSecret(caCertificate);
+  setSecret(password);
+  const workDir = (0, import_node_fs2.mkdtempSync)((0, import_node_path.join)(process.env.RUNNER_TEMP || (0, import_node_os.tmpdir)(), "notation-action-"));
+  try {
+    const configRoot = (0, import_node_path.join)(workDir, "config");
+    const notationDir = (0, import_node_path.join)(configRoot, "notation");
+    const trustStore = (0, import_node_path.join)(notationDir, "truststore", "x509", "ca", "release");
+    const keyPath = (0, import_node_path.join)(workDir, "signer.key");
+    const certificatePath = (0, import_node_path.join)(workDir, "certificate-chain.pem");
+    (0, import_node_fs2.mkdirSync)(trustStore, { recursive: true, mode: 448 });
+    (0, import_node_fs2.writeFileSync)(keyPath, privateKey, { mode: 384 });
+    (0, import_node_fs2.writeFileSync)(certificatePath, certificateChain, { mode: 384 });
+    (0, import_node_fs2.writeFileSync)((0, import_node_path.join)(trustStore, "ca.crt"), caCertificate, { mode: 384 });
+    (0, import_node_fs2.chmodSync)(workDir, 448);
+    (0, import_node_fs2.writeFileSync)((0, import_node_path.join)(notationDir, "signingkeys.json"), JSON.stringify({
+      default: keyName,
+      keys: [{ name: keyName, keyPath, certPath: certificatePath }]
+    }));
+    const scope = artifact.split("@", 1)[0];
+    (0, import_node_fs2.writeFileSync)((0, import_node_path.join)(notationDir, "trustpolicy.json"), JSON.stringify({
+      version: "1.0",
+      trustPolicies: [{
+        name: "release",
+        registryScopes: [scope],
+        signatureVerification: { level: "strict" },
+        trustStores: ["ca:release"],
+        trustedIdentities: ["*"]
+      }]
+    }));
+    const env = { ...process.env, XDG_CONFIG_HOME: configRoot, NOTATION_USERNAME: username, NOTATION_PASSWORD: password };
+    (0, import_node_child_process.execFileSync)(binary, ["sign", "--key", keyName, "--signature-format", signatureFormat, artifact], { env, stdio: "inherit" });
+    (0, import_node_child_process.execFileSync)(binary, ["verify", artifact], { env, stdio: "inherit" });
+  } finally {
+    (0, import_node_fs2.rmSync)(workDir, { recursive: true, force: true });
+  }
+}
 async function run() {
   try {
     const requested = getInput("version") || "latest";
     const version = requested === "latest" ? await latestVersion() : normalizeVersion(requested);
-    const cached = find("notation", version, process.arch);
-    if (cached) {
-      addPath(cached);
-      setOutput("version", version);
-      return;
-    }
-    const asset = assetName(version, process.platform, process.arch);
-    const baseUrl = `https://github.com/${repository}/releases/download/v${version}`;
-    const [archive, checksumFile] = await Promise.all([
-      downloadTool(`${baseUrl}/${asset}`),
-      downloadTool(`${baseUrl}/notation_${version}_checksums.txt`)
-    ]);
-    const expected = expectedChecksum((0, import_node_fs2.readFileSync)(checksumFile, "utf8"), asset);
-    const actual = sha256(archive);
-    if (actual !== expected) throw new Error(`Checksum mismatch for ${asset}: expected ${expected}, got ${actual}`);
-    const extracted = process.platform === "win32" ? await extractZip(archive) : await extractTar(archive);
-    const cachedPath = await cacheDir(extracted, "notation", version, process.arch);
-    addPath(cachedPath);
+    const binary = await install(version);
     setOutput("version", version);
-    const binary = (0, import_node_path.join)(cachedPath, process.platform === "win32" ? "notation.exe" : "notation");
     (0, import_node_child_process.execFileSync)(binary, ["version"], { stdio: "inherit" });
+    const artifact = getInput("artifact");
+    if (artifact) signAndVerify(binary, artifact);
   } catch (error2) {
     setFailed(error2 instanceof Error ? error2.message : String(error2));
   }

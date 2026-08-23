@@ -9,6 +9,32 @@ inputs:
     description: Notation CLI version, with or without a leading v, or latest
     required: false
     default: latest
+  artifact:
+    description: Immutable OCI artifact reference to sign and verify; omit for setup only
+    required: false
+  key-name:
+    description: Name assigned to the local signing key
+    required: false
+    default: notation-action
+  private-key:
+    description: PEM private key used when artifact is provided
+    required: false
+  certificate-chain:
+    description: PEM leaf certificate and chain used when artifact is provided
+    required: false
+  ca-certificate:
+    description: PEM CA certificate used for strict verification
+    required: false
+  username:
+    description: Registry username used when artifact is provided
+    required: false
+  password:
+    description: Registry password used when artifact is provided
+    required: false
+  signature-format:
+    description: Notation signature envelope format
+    required: false
+    default: jws
 outputs:
   version:
     description: Installed Notation CLI version
