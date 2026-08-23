@@ -1,0 +1,22 @@
+{
+  "name": "notation-action",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Install the official Notation CLI in GitHub Actions",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/index.js",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@actions/core": "3.0.1",
+    "@actions/tool-cache": "4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

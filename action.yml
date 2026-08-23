@@ -1,0 +1,17 @@
+name: Set up Notation
+description: Download, verify, cache, and add the official Notation CLI to PATH
+author: Jonathan Seth Mainguy
+branding:
+  icon: shield
+  color: blue
+inputs:
+  version:
+    description: Notation CLI version, with or without a leading v, or latest
+    required: false
+    default: latest
+outputs:
+  version:
+    description: Installed Notation CLI version
+runs:
+  using: node24
+  main: dist/index.js
